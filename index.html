@@ -68,6 +68,8 @@
       addDoc, 
       deleteDoc, 
       doc, 
+      setDoc,
+      getDoc,
       onSnapshot, 
       query, 
       orderBy,
@@ -80,7 +82,7 @@
       ArrowUpCircle, ArrowDownCircle, Trash2, PieChart, 
       DollarSign, Calendar, Filter, Briefcase, Target, 
       LogOut, User, Lock, Mail, Loader2, AlertCircle,
-      CreditCard, Calculator, X
+      CreditCard, Calculator, X, CheckCircle2, PiggyBank
     } from "lucide-react";
 
     // Charts (Recharts)
@@ -107,6 +109,7 @@
 
     // --- Utilitários ---
     const formatCurrency = (value) => {
+      if (typeof value !== 'number') return 'R$ 0,00';
       return new Intl.NumberFormat('pt-BR', {
         style: 'currency',
         currency: 'BRL'
@@ -115,9 +118,14 @@
 
     const formatDate = (dateString) => {
       if (!dateString) return '';
-      const options = { day: '2-digit', month: '2-digit', year: 'numeric' };
-      const date = new Date(dateString + 'T12:00:00'); 
-      return date.toLocaleDateString('pt-BR', options);
+      try {
+        const date = new Date(dateString + 'T12:00:00'); 
+        if (isNaN(date.getTime())) return dateString;
+        const options = { day: '2-digit', month: '2-digit', year: 'numeric' };
+        return date.toLocaleDateString('pt-BR', options);
+      } catch (e) {
+        return dateString;
+      }
     };
 
     const CATEGORIES = {
@@ -288,11 +296,9 @@
     // --- Views Internas ---
 
     const DashboardView = ({ transactions }) => {
-      // Estado para o filtro (inicia com mês atual)
       const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
 
       const summary = useMemo(() => {
-        // Filtrar transações pelo filtro de data (ou todas se filtro vazio)
         let filteredDocs = transactions;
         if (filterMonth) {
             filteredDocs = transactions.filter(t => t.date.startsWith(filterMonth));
@@ -300,8 +306,6 @@
         
         const income = filteredDocs.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
         const expense = filteredDocs.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
-        
-        // AJUSTE: Saldo agora reflete Receita - Despesa do período filtrado
         const balance = income - expense;
 
         return { income, expense, balance };
@@ -309,7 +313,6 @@
 
       const chartData = useMemo(() => {
         const data = {};
-        // Gráfico mostra despesas do filtro
         let filteredDocs = transactions;
         if (filterMonth) {
             filteredDocs = transactions.filter(t => t.date.startsWith(filterMonth));
@@ -326,7 +329,6 @@
       const areaChartData = useMemo(() => {
           const grouped = {};
           
-          // Se tiver filtro, mostra evolução do mês filtrado. Se não, últimos dias globais.
           let filteredDocs = transactions;
           if (filterMonth) {
             filteredDocs = transactions.filter(t => t.date.startsWith(filterMonth));
@@ -341,7 +343,6 @@
               else grouped[date].saida += t.amount;
           });
           
-          // Se tiver filtro, mostra todo o período filtrado. Se não, corta nos últimos 7.
           if (filterMonth) return Object.values(grouped);
           return Object.values(grouped).slice(-7);
       }, [transactions, filterMonth]);
@@ -350,7 +351,6 @@
 
       return (
         <div className="space-y-6 animate-fadeIn">
-          {/* Cabeçalho do Dashboard com Filtro */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-800/30 p-4 rounded-xl border border-slate-700/30">
             <div>
                 <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -505,22 +505,17 @@
         e.preventDefault();
         if (!formData.description || !formData.amount) return;
 
-        // Se for parcelado
         if (formData.isInstallment && formData.type === 'expense') {
             const total = parseInt(formData.totalInstallments);
             const start = parseInt(formData.currentInstallment);
             const totalValue = parseFloat(formData.amount);
-            const installmentValue = totalValue / total; // Valor de cada parcela
+            const installmentValue = totalValue / total;
             const baseDate = new Date(formData.date);
             const transactionsToAdd = [];
 
-            // Loop para criar parcelas futuras
             for (let i = 0; i < (total - start + 1); i++) {
                 const currentNum = start + i;
-                
-                // Calcula data da parcela (mês a mês)
-                // Nota: SetMonth lida automaticamente com virada de ano (ex: mês 13 vira jan do próx ano)
-                const parcelDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + i, baseDate.getDate() + 1); // +1 para fuso
+                const parcelDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + i, baseDate.getDate() + 1); 
                 const dateString = parcelDate.toISOString().split('T')[0];
 
                 transactionsToAdd.push({
@@ -532,14 +527,11 @@
                 });
             }
 
-            // Envia array para função pai (precisaremos adaptar o onAdd no App ou chamar multiple vezes)
-            // Para simplicidade aqui, vamos chamar onAdd várias vezes
             for (const t of transactionsToAdd) {
                 await onAdd(t);
             }
 
         } else {
-            // Transação única
             await onAdd({
                 description: formData.description,
                 amount: parseFloat(formData.amount),
@@ -549,7 +541,6 @@
             });
         }
         
-        // Reset form (mantendo a data atual)
         setFormData({ 
             ...formData, 
             description: '', 
@@ -560,7 +551,6 @@
         });
       };
 
-      // Filtra transações pelo mês selecionado
       const filteredTransactions = transactions.filter(t => {
           if (!filterMonth) return true;
           return t.date.startsWith(filterMonth);
@@ -636,7 +626,6 @@
                   </div>
                 </div>
 
-                {/* Área de Parcelamento (Apenas para despesas) */}
                 {formData.type === 'expense' && (
                     <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
                         <div className="flex items-center gap-2 mb-2">
@@ -708,7 +697,6 @@
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
               <h3 className="text-xl font-bold text-white">Lançamentos</h3>
               
-              {/* Filtro de Mês */}
               <div className="flex items-center gap-2 bg-slate-800 p-1 rounded-xl border border-slate-700">
                 <input 
                     type="month" 
@@ -770,85 +758,24 @@
       );
     };
 
-    const InvestmentsView = () => {
-      const [hasInvestments, setHasInvestments] = useState(false);
-
-      if (!hasInvestments) {
-        return (
-          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center animate-fadeIn">
-            <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-12 rounded-3xl max-w-2xl shadow-2xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
-              <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
-              
-              <div className="relative z-10">
-                <div className="w-20 h-20 bg-slate-900 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl border border-slate-700">
-                  <Target size={40} className="text-cyan-400" />
-                </div>
-                
-                <h2 className="text-3xl font-bold text-white mb-4">Comece sua Jornada Investidora</h2>
-                <p className="text-slate-400 mb-8 max-w-md mx-auto">
-                  Você ainda não possui investimentos cadastrados. O Pratta Tech Finance ajuda você a planejar e acompanhar a evolução do seu patrimônio.
-                </p>
-                <Button onClick={() => setHasInvestments(true)} className="w-full md:w-auto px-8 py-3 text-lg shadow-cyan-500/25">
-                  Criar meu Primeiro Investimento
-                </Button>
-              </div>
-            </div>
-          </div>
-        );
-      }
-
-      return (
-        <div className="animate-fadeIn space-y-6">
-          <div className="flex justify-between items-center">
-            <h2 className="text-2xl font-bold text-white">Minha Carteira</h2>
-            <Button onClick={() => setHasInvestments(false)} variant="secondary" className="text-sm">
-              Simular Reset
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl md:col-span-2">
-                <div className="flex items-center justify-between mb-6">
-                    <h3 className="font-bold text-white">Patrimônio Total</h3>
-                    <span className="text-2xl font-bold text-emerald-400">R$ 0,00</span>
-                </div>
-                <div className="h-64 flex flex-col items-center justify-center text-slate-500 border-2 border-dashed border-slate-700 rounded-xl bg-slate-900/30">
-                    <Plus size={32} className="mb-2 opacity-50" />
-                    <p>Adicione ativos para ver o gráfico de evolução</p>
-                </div>
-            </div>
-
-            <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl">
-                <h3 className="font-bold text-white mb-4">Adicionar Ativo</h3>
-                <form className="space-y-3">
-                    <input className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Nome (ex: Tesouro Selic)" />
-                    <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm">
-                        <option>Renda Fixa</option>
-                        <option>Ações</option>
-                        <option>FIIs</option>
-                        <option>Cripto</option>
-                    </select>
-                    <input className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Valor Investido" type="number" />
-                    <Button className="w-full mt-2">Confirmar</Button>
-                </form>
-            </div>
-          </div>
-        </div>
-      );
-    };
-
     const TimelineView = ({ transactions }) => {
+      // Ordena por data (mais recente primeiro) e garante que transactions não é nulo
+      const sortedTransactions = useMemo(() => {
+        if (!transactions || !Array.isArray(transactions)) return [];
+        return [...transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+      }, [transactions]);
+
       return (
         <div className="max-w-3xl mx-auto animate-fadeIn">
           <h2 className="text-2xl font-bold text-white mb-8 pl-4">Linha do Tempo</h2>
-          {transactions.length === 0 ? (
+          {sortedTransactions.length === 0 ? (
               <div className="text-slate-500 pl-4">Nenhum evento registrado.</div>
           ) : (
           <div className="relative border-l-2 border-slate-700 ml-4 space-y-8 pb-8">
-            {transactions.map((t, index) => (
-              <div key={t.id} className="relative pl-8">
-                <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-2 ${
+            {sortedTransactions.map((t, index) => (
+              <div key={t.id || index} className="relative pl-8">
+                {/* Ajuste de centralização do ponto: -left-[7px] para alinhar no centro da borda de 2px */}
+                <div className={`absolute -left-[7px] top-0 w-4 h-4 rounded-full border-2 ${
                   t.type === 'income' ? 'bg-emerald-500 border-emerald-900' : 'bg-rose-500 border-rose-900'
                 }`}></div>
                 
@@ -872,6 +799,199 @@
             ))}
           </div>
           )}
+        </div>
+      );
+    };
+
+    const InvestmentsView = ({ user }) => {
+      const [hasInvestments, setHasInvestments] = useState(false);
+      const [challengeSelection, setChallengeSelection] = useState([]);
+      const [savingLoading, setSavingLoading] = useState(false);
+
+      // Sequência para o desafio (1..175..1)
+      const SEQUENCE = useMemo(() => {
+        const up = Array.from({length: 175}, (_, i) => i + 1);
+        const down = [...up].reverse();
+        return [...up, ...down];
+      }, []);
+
+      // Total possível
+      const TOTAL_CHALLENGE = useMemo(() => SEQUENCE.reduce((a, b) => a + b, 0), [SEQUENCE]);
+
+      // Carregar dados do desafio
+      useEffect(() => {
+        if (!user) return;
+        const fetchChallenge = async () => {
+            const docRef = doc(db, 'users', user.uid, 'challenges', 'saving_175');
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                setChallengeSelection(docSnap.data().selected || []);
+            }
+        };
+        fetchChallenge();
+      }, [user]);
+
+      const toggleNumber = async (index) => {
+        if (!user) return;
+        const newSelection = challengeSelection.includes(index) 
+            ? challengeSelection.filter(i => i !== index)
+            : [...challengeSelection, index];
+        
+        setChallengeSelection(newSelection);
+        
+        // Salvar no Firebase (Debounce ou direto)
+        try {
+            await setDoc(doc(db, 'users', user.uid, 'challenges', 'saving_175'), {
+                selected: newSelection
+            }, { merge: true });
+        } catch (e) {
+            console.error("Erro ao salvar desafio", e);
+        }
+      };
+
+      const currentSaved = useMemo(() => {
+        return challengeSelection.reduce((acc, index) => acc + SEQUENCE[index], 0);
+      }, [challengeSelection, SEQUENCE]);
+
+      if (!hasInvestments) {
+        return (
+          <div className="flex flex-col items-center justify-center min-h-[60vh] text-center animate-fadeIn space-y-12">
+            <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-12 rounded-3xl max-w-2xl shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2"></div>
+              <div className="absolute bottom-0 left-0 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2"></div>
+              
+              <div className="relative z-10">
+                <div className="w-20 h-20 bg-slate-900 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-xl border border-slate-700">
+                  <Target size={40} className="text-cyan-400" />
+                </div>
+                
+                <h2 className="text-3xl font-bold text-white mb-4">Comece sua Jornada Investidora</h2>
+                <p className="text-slate-400 mb-8 max-w-md mx-auto">
+                  Você ainda não possui investimentos cadastrados. O Pratta Tech Finance ajuda você a planejar e acompanhar a evolução do seu patrimônio.
+                </p>
+                <Button onClick={() => setHasInvestments(true)} className="w-full md:w-auto px-8 py-3 text-lg shadow-cyan-500/25">
+                  Criar meu Primeiro Investimento
+                </Button>
+              </div>
+            </div>
+
+            {/* Seção do Desafio (Sempre visível ou parte da intro) */}
+            <div className="w-full max-w-5xl">
+                <div className="flex flex-col md:flex-row justify-between items-end mb-6 gap-4">
+                    <div className="text-left">
+                        <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                            <PiggyBank className="text-emerald-400" /> Desafio de Poupança (R$ 30.800)
+                        </h3>
+                        <p className="text-slate-400 text-sm mt-1">
+                            Guarde a quantia correspondente a cada número. Marque quando guardar.
+                        </p>
+                    </div>
+                    <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 text-right">
+                        <span className="text-xs text-slate-400 block">Total Acumulado</span>
+                        <span className="text-2xl font-bold text-emerald-400">{formatCurrency(currentSaved)}</span>
+                    </div>
+                </div>
+
+                <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl overflow-hidden">
+                    <div className="grid grid-cols-5 sm:grid-cols-8 md:grid-cols-10 lg:grid-cols-14 gap-2">
+                        {SEQUENCE.map((val, idx) => {
+                            const isSelected = challengeSelection.includes(idx);
+                            return (
+                                <button
+                                    key={idx}
+                                    onClick={() => toggleNumber(idx)}
+                                    className={`
+                                        h-10 rounded-lg text-xs font-bold transition-all duration-200 flex items-center justify-center relative
+                                        ${isSelected 
+                                            ? 'bg-emerald-500 text-white shadow-[0_0_10px_rgba(16,185,129,0.4)] scale-105 z-10' 
+                                            : 'bg-slate-800 text-slate-500 hover:bg-slate-700 hover:text-slate-300'
+                                        }
+                                    `}
+                                >
+                                    {isSelected && <CheckCircle2 size={12} className="absolute -top-1 -right-1 text-white bg-emerald-600 rounded-full" />}
+                                    R$ {val}
+                                </button>
+                            )
+                        })}
+                    </div>
+                </div>
+            </div>
+          </div>
+        );
+      }
+
+      // Visão de Carteira Completa (Placeholder + Desafio)
+      return (
+        <div className="animate-fadeIn space-y-8">
+          <div className="flex justify-between items-center">
+            <h2 className="text-2xl font-bold text-white">Minha Carteira</h2>
+            <Button onClick={() => setHasInvestments(false)} variant="secondary" className="text-sm">
+              Voltar
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl md:col-span-2">
+                <div className="flex items-center justify-between mb-6">
+                    <h3 className="font-bold text-white">Patrimônio Total</h3>
+                    <span className="text-2xl font-bold text-emerald-400">R$ {formatCurrency(currentSaved)}</span>
+                </div>
+                <div className="h-64 flex flex-col items-center justify-center text-slate-500 border-2 border-dashed border-slate-700 rounded-xl bg-slate-900/30">
+                    <Plus size={32} className="mb-2 opacity-50" />
+                    <p>Adicione ativos para ver o gráfico de evolução</p>
+                </div>
+            </div>
+
+            <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl">
+                <h3 className="font-bold text-white mb-4">Adicionar Ativo</h3>
+                <form className="space-y-3">
+                    <input className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Nome (ex: Tesouro Selic)" />
+                    <select className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm">
+                        <option>Renda Fixa</option>
+                        <option>Ações</option>
+                        <option>FIIs</option>
+                        <option>Cripto</option>
+                    </select>
+                    <input className="w-full bg-slate-900 border border-slate-700 rounded-lg p-3 text-white text-sm" placeholder="Valor Investido" type="number" />
+                    <Button className="w-full mt-2">Confirmar</Button>
+                </form>
+            </div>
+          </div>
+
+          {/* Desafio dentro da visão de carteira também */}
+          <div className="border-t border-slate-800 pt-8">
+             <div className="flex justify-between items-center mb-6">
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <PiggyBank className="text-emerald-400" /> Desafio de Poupança
+                </h3>
+                <span className="text-emerald-400 font-bold bg-emerald-500/10 px-3 py-1 rounded-lg">
+                    {formatCurrency(currentSaved)} acumulados
+                </span>
+             </div>
+             
+             <div className="bg-slate-900/50 border border-slate-800 p-6 rounded-2xl overflow-hidden max-h-[400px] overflow-y-auto">
+                <div className="grid grid-cols-5 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-16 gap-2">
+                    {SEQUENCE.map((val, idx) => {
+                        const isSelected = challengeSelection.includes(idx);
+                        return (
+                            <button
+                                key={idx}
+                                onClick={() => toggleNumber(idx)}
+                                className={`
+                                    h-8 rounded text-[10px] font-bold transition-all duration-200 flex items-center justify-center
+                                    ${isSelected 
+                                        ? 'bg-emerald-500 text-white' 
+                                        : 'bg-slate-800 text-slate-500 hover:bg-slate-700'
+                                    }
+                                `}
+                            >
+                                {val}
+                            </button>
+                        )
+                    })}
+                </div>
+             </div>
+          </div>
         </div>
       );
     };
@@ -917,7 +1037,6 @@
         if(!user) return;
         setLoadingOp(true);
         try {
-            // Removemos id se vier, o Firestore gera
             const { id, ...data } = newTransaction; 
             await addDoc(collection(db, 'users', user.uid, 'transactions'), data);
         } catch (error) {
@@ -1055,7 +1174,7 @@
                 loadingOp={loadingOp}
               />
             )}
-            {activeTab === 'investments' && <InvestmentsView />}
+            {activeTab === 'investments' && <InvestmentsView user={user} />}
             {activeTab === 'timeline' && <TimelineView transactions={transactions} />}
           </main>
         </div>

@@ -1,15 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-
-  <head>
-    <meta charset="UTF-8">
-    <title>Pessoal - Financas Pessoais</title>
-    
-
-  </head>
-    
-  <body>
-  <!-- 
+<!-- 
   IMPORTANTE: 
   Copie TUDO isso e cole APENAS na caixa de HTML do CodePen.
   Deixe as caixas CSS e JS vazias.
@@ -81,7 +70,8 @@
       doc, 
       onSnapshot, 
       query, 
-      orderBy 
+      orderBy,
+      writeBatch
     } from "firebase/firestore";
 
     // Icons (Lucide)
@@ -89,7 +79,8 @@
       LayoutDashboard, Wallet, TrendingUp, History, Plus, 
       ArrowUpCircle, ArrowDownCircle, Trash2, PieChart, 
       DollarSign, Calendar, Filter, Briefcase, Target, 
-      LogOut, User, Lock, Mail, Loader2, AlertCircle 
+      LogOut, User, Lock, Mail, Loader2, AlertCircle,
+      CreditCard, Calculator, X
     } from "lucide-react";
 
     // Charts (Recharts)
@@ -131,7 +122,7 @@
 
     const CATEGORIES = {
       income: ['Salário', 'Investimentos', 'Extra', 'Outros'],
-      expense: ['Moradia', 'Alimentação', 'Transporte', 'Lazer', 'Saúde', 'Educação', 'Contas', 'Outros']
+      expense: ['Moradia', 'Alimentação', 'Consumo Online', 'Transporte', 'Lazer', 'Saúde', 'Educação', 'Contas', 'Outros']
     };
 
     // --- Componentes ---
@@ -168,7 +159,7 @@
       </div>
     );
 
-    const Button = ({ children, onClick, variant = 'primary', className = '', disabled, ...props }) => {
+    const Button = ({ children, onClick, variant = 'primary', className = '', disabled, type = 'button', ...props }) => {
       const baseStyle = "px-4 py-2 rounded-xl font-medium transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed";
       const variants = {
         primary: "bg-cyan-500 hover:bg-cyan-600 text-white shadow-lg shadow-cyan-500/20",
@@ -180,6 +171,7 @@
       return (
         <button 
           onClick={onClick} 
+          type={type}
           className={`${baseStyle} ${variants[variant]} ${className}`}
           disabled={disabled}
           {...props}
@@ -296,31 +288,48 @@
     // --- Views Internas ---
 
     const DashboardView = ({ transactions }) => {
+      // Pega o mês atual para o resumo
+      const currentMonth = new Date().toISOString().slice(0, 7);
+
       const summary = useMemo(() => {
-        const income = transactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
-        const expense = transactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
-        return { income, expense, balance: income - expense };
-      }, [transactions]);
+        // Filtrar transações apenas do mês atual para os cards de resumo
+        const currentMonthTransactions = transactions.filter(t => t.date.startsWith(currentMonth));
+        
+        const income = currentMonthTransactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
+        const expense = currentMonthTransactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
+        
+        // Saldo total considera tudo (acumulado)
+        const totalIncome = transactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
+        const totalExpense = transactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
+        const balance = totalIncome - totalExpense;
+
+        return { income, expense, balance };
+      }, [transactions, currentMonth]);
 
       const chartData = useMemo(() => {
         const data = {};
-        transactions.forEach(t => {
-          if (t.type === 'expense') {
+        // Gráfico mostra despesas do mês atual
+        transactions
+          .filter(t => t.date.startsWith(currentMonth) && t.type === 'expense')
+          .forEach(t => {
             data[t.category] = (data[t.category] || 0) + t.amount;
-          }
-        });
+          });
         return Object.keys(data).map(key => ({ name: key, value: data[key] }));
-      }, [transactions]);
+      }, [transactions, currentMonth]);
 
       const areaChartData = useMemo(() => {
           const grouped = {};
-          transactions.forEach(t => {
+          // Gráfico de linha mostra os últimos dias (independente do mês)
+          const sorted = [...transactions].sort((a,b) => a.date.localeCompare(b.date));
+          
+          sorted.forEach(t => {
               const date = t.date;
               if (!grouped[date]) grouped[date] = { name: formatDate(date).slice(0,5), entrada: 0, saida: 0, fullDate: date };
               if (t.type === 'income') grouped[date].entrada += t.amount;
               else grouped[date].saida += t.amount;
           });
-          return Object.values(grouped).sort((a,b) => a.fullDate.localeCompare(b.fullDate)).slice(-7);
+          // Pegar os últimos 7 dias com movimentação
+          return Object.values(grouped).slice(-7);
       }, [transactions]);
 
       const COLORS = ['#06b6d4', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#6366f1'];
@@ -329,19 +338,19 @@
         <div className="space-y-6 animate-fadeIn">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card 
-              title="Saldo Atual" 
+              title="Saldo Acumulado" 
               value={formatCurrency(summary.balance)} 
               icon={Wallet} 
               type="balance"
             />
             <Card 
-              title="Receitas" 
+              title="Receitas (Este Mês)" 
               value={formatCurrency(summary.income)} 
               icon={ArrowUpCircle} 
               type="income"
             />
             <Card 
-              title="Despesas" 
+              title="Despesas (Este Mês)" 
               value={formatCurrency(summary.expense)} 
               icon={ArrowDownCircle} 
               type="expense"
@@ -389,7 +398,7 @@
             <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl shadow-lg">
               <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                 <PieChart size={20} className="text-purple-400" />
-                Despesas por Categoria
+                Despesas por Categoria (Mês Atual)
               </h3>
               <div className="h-64 flex items-center justify-center">
                 {chartData.length > 0 ? (
@@ -412,7 +421,7 @@
                     </RePieChart>
                     </ResponsiveContainer>
                 ) : (
-                    <div className="text-slate-500">Sem despesas lançadas</div>
+                    <div className="text-slate-500">Sem despesas este mês</div>
                 )}
               </div>
               <div className="flex flex-wrap justify-center gap-3 mt-4">
@@ -430,12 +439,17 @@
     };
 
     const TransactionsView = ({ transactions, onAdd, onDelete, loadingOp }) => {
+      const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
+      
       const [formData, setFormData] = useState({
         description: '',
         amount: '',
         type: 'expense',
         category: '',
-        date: new Date().toISOString().split('T')[0]
+        date: new Date().toISOString().split('T')[0],
+        isInstallment: false,
+        totalInstallments: 12,
+        currentInstallment: 1
       });
 
       useEffect(() => {
@@ -444,16 +458,70 @@
         }
       }, [formData.type]);
 
-      const handleSubmit = (e) => {
+      const handleSubmit = async (e) => {
         e.preventDefault();
         if (!formData.description || !formData.amount) return;
+
+        // Se for parcelado
+        if (formData.isInstallment && formData.type === 'expense') {
+            const total = parseInt(formData.totalInstallments);
+            const start = parseInt(formData.currentInstallment);
+            const totalValue = parseFloat(formData.amount);
+            const installmentValue = totalValue / total; // Valor de cada parcela
+            const baseDate = new Date(formData.date);
+            const transactionsToAdd = [];
+
+            // Loop para criar parcelas futuras
+            for (let i = 0; i < (total - start + 1); i++) {
+                const currentNum = start + i;
+                
+                // Calcula data da parcela (mês a mês)
+                // Nota: SetMonth lida automaticamente com virada de ano (ex: mês 13 vira jan do próx ano)
+                const parcelDate = new Date(baseDate.getFullYear(), baseDate.getMonth() + i, baseDate.getDate() + 1); // +1 para fuso
+                const dateString = parcelDate.toISOString().split('T')[0];
+
+                transactionsToAdd.push({
+                    description: `${formData.description} (${currentNum}/${total})`,
+                    amount: installmentValue,
+                    type: 'expense',
+                    category: formData.category,
+                    date: dateString
+                });
+            }
+
+            // Envia array para função pai (precisaremos adaptar o onAdd no App ou chamar multiple vezes)
+            // Para simplicidade aqui, vamos chamar onAdd várias vezes
+            for (const t of transactionsToAdd) {
+                await onAdd(t);
+            }
+
+        } else {
+            // Transação única
+            await onAdd({
+                description: formData.description,
+                amount: parseFloat(formData.amount),
+                type: formData.type,
+                category: formData.category,
+                date: formData.date
+            });
+        }
         
-        onAdd({
-          ...formData,
-          amount: parseFloat(formData.amount)
+        // Reset form (mantendo a data atual)
+        setFormData({ 
+            ...formData, 
+            description: '', 
+            amount: '', 
+            isInstallment: false,
+            totalInstallments: 12,
+            currentInstallment: 1
         });
-        setFormData({ ...formData, description: '', amount: '' });
       };
+
+      // Filtra transações pelo mês selecionado
+      const filteredTransactions = transactions.filter(t => {
+          if (!filterMonth) return true;
+          return t.date.startsWith(filterMonth);
+      }).sort((a,b) => new Date(b.date) - new Date(a.date));
 
       return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-fadeIn">
@@ -471,14 +539,14 @@
                     value={formData.description}
                     onChange={(e) => setFormData({...formData, description: e.target.value})}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-cyan-500 transition-colors"
-                    placeholder="Ex: Supermercado"
+                    placeholder="Ex: Compra Online"
                     required
                   />
                 </div>
                 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm text-slate-400 mb-1">Valor</label>
+                    <label className="block text-sm text-slate-400 mb-1">Valor Total</label>
                     <input 
                       type="number" 
                       step="0.01"
@@ -506,7 +574,7 @@
                   <div className="grid grid-cols-2 gap-2 bg-slate-900 p-1 rounded-xl">
                     <button
                       type="button"
-                      onClick={() => setFormData({...formData, type: 'income'})}
+                      onClick={() => setFormData({...formData, type: 'income', isInstallment: false})}
                       className={`p-2 rounded-lg text-sm font-medium transition-all ${
                         formData.type === 'income' ? 'bg-emerald-500/20 text-emerald-400 shadow-sm' : 'text-slate-500 hover:text-slate-300'
                       }`}
@@ -525,6 +593,54 @@
                   </div>
                 </div>
 
+                {/* Área de Parcelamento (Apenas para despesas) */}
+                {formData.type === 'expense' && (
+                    <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-700/50">
+                        <div className="flex items-center gap-2 mb-2">
+                            <input 
+                                type="checkbox" 
+                                id="isInstallment"
+                                checked={formData.isInstallment}
+                                onChange={(e) => setFormData({...formData, isInstallment: e.target.checked})}
+                                className="w-4 h-4 rounded border-slate-600 text-cyan-500 focus:ring-cyan-500 bg-slate-800"
+                            />
+                            <label htmlFor="isInstallment" className="text-sm text-slate-300 select-none cursor-pointer flex items-center gap-1">
+                                <CreditCard size={14} /> Parcelar Compra?
+                            </label>
+                        </div>
+
+                        {formData.isInstallment && (
+                            <div className="grid grid-cols-2 gap-3 animate-fadeIn">
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Qtd Parcelas</label>
+                                    <input 
+                                        type="number" 
+                                        min="2"
+                                        value={formData.totalInstallments}
+                                        onChange={(e) => setFormData({...formData, totalInstallments: e.target.value})}
+                                        className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white text-sm"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Parcela Atual</label>
+                                    <input 
+                                        type="number" 
+                                        min="1"
+                                        max={formData.totalInstallments}
+                                        value={formData.currentInstallment}
+                                        onChange={(e) => setFormData({...formData, currentInstallment: e.target.value})}
+                                        className="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 text-white text-sm"
+                                    />
+                                </div>
+                                <div className="col-span-2 text-xs text-cyan-400 flex items-center gap-1 bg-cyan-900/10 p-2 rounded">
+                                    <Calculator size={12} />
+                                    Serão criadas {formData.totalInstallments - formData.currentInstallment + 1} transações de {formatCurrency(formData.amount / formData.totalInstallments)}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )}
+
                 <div>
                   <label className="block text-sm text-slate-400 mb-1">Categoria</label>
                   <select 
@@ -539,58 +655,72 @@
                 </div>
 
                 <Button type="submit" className="w-full mt-4" disabled={loadingOp}>
-                  {loadingOp ? <Loader2 className="animate-spin" size={20}/> : 'Adicionar Lançamento'}
+                  {loadingOp ? <Loader2 className="animate-spin" size={20}/> : (formData.isInstallment ? 'Gerar Parcelas' : 'Adicionar Lançamento')}
                 </Button>
               </form>
             </div>
           </div>
 
           <div className="lg:col-span-2 space-y-4">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xl font-bold text-white">Últimos Lançamentos</h3>
-              <div className="flex gap-2">
-                <Button variant="ghost" className="text-sm py-1 px-3">
-                  <Filter size={14} /> Filtrar
-                </Button>
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
+              <h3 className="text-xl font-bold text-white">Lançamentos</h3>
+              
+              {/* Filtro de Mês */}
+              <div className="flex items-center gap-2 bg-slate-800 p-1 rounded-xl border border-slate-700">
+                <input 
+                    type="month" 
+                    value={filterMonth}
+                    onChange={(e) => setFilterMonth(e.target.value)}
+                    className="bg-transparent text-white text-sm border-none focus:ring-0 p-2 outline-none"
+                />
+                <button 
+                    onClick={() => setFilterMonth('')} 
+                    className="p-2 text-slate-400 hover:text-white"
+                    title="Limpar Filtro"
+                >
+                    <X size={16} />
+                </button>
               </div>
             </div>
 
-            {transactions.length === 0 ? (
+            {filteredTransactions.length === 0 ? (
               <div className="text-center py-12 text-slate-500 bg-slate-800/30 rounded-2xl border border-slate-700/30 border-dashed">
-                Nenhuma transação encontrada. <br/> Adicione sua primeira movimentação.
+                Nenhuma transação encontrada neste período. <br/> 
               </div>
             ) : (
-              transactions.map((t) => (
-                <div key={t.id} className="group bg-slate-800/30 border border-slate-700/30 p-4 rounded-xl flex items-center justify-between hover:bg-slate-800/60 transition-all">
-                    <div className="flex items-center gap-4">
-                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                        t.type === 'income' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
-                    }`}>
-                        {t.type === 'income' ? <ArrowUpCircle size={20} /> : <ArrowDownCircle size={20} />}
-                    </div>
-                    <div>
-                        <p className="font-semibold text-white">{t.description}</p>
-                        <div className="flex gap-2 text-xs text-slate-400 mt-1">
-                        <span className="flex items-center gap-1"><Calendar size={10} /> {formatDate(t.date)}</span>
-                        <span className="bg-slate-700/50 px-2 rounded text-slate-300">{t.category}</span>
+                <div className="space-y-2">
+                  {filteredTransactions.map((t) => (
+                    <div key={t.id} className="group bg-slate-800/30 border border-slate-700/30 p-4 rounded-xl flex items-center justify-between hover:bg-slate-800/60 transition-all">
+                        <div className="flex items-center gap-4">
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                            t.type === 'income' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-rose-500/10 text-rose-400'
+                        }`}>
+                            {t.type === 'income' ? <ArrowUpCircle size={20} /> : <ArrowDownCircle size={20} />}
+                        </div>
+                        <div>
+                            <p className="font-semibold text-white">{t.description}</p>
+                            <div className="flex gap-2 text-xs text-slate-400 mt-1">
+                            <span className="flex items-center gap-1"><Calendar size={10} /> {formatDate(t.date)}</span>
+                            <span className="bg-slate-700/50 px-2 rounded text-slate-300">{t.category}</span>
+                            </div>
+                        </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                        <span className={`font-bold ${
+                            t.type === 'income' ? 'text-emerald-400' : 'text-rose-400'
+                        }`}>
+                            {t.type === 'expense' ? '-' : '+'} {formatCurrency(t.amount)}
+                        </span>
+                        <button 
+                            onClick={() => onDelete(t.id)}
+                            className="opacity-0 group-hover:opacity-100 p-2 text-slate-500 hover:text-rose-400 transition-all"
+                        >
+                            <Trash2 size={16} />
+                        </button>
                         </div>
                     </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                    <span className={`font-bold ${
-                        t.type === 'income' ? 'text-emerald-400' : 'text-rose-400'
-                    }`}>
-                        {t.type === 'expense' ? '-' : '+'} {formatCurrency(t.amount)}
-                    </span>
-                    <button 
-                        onClick={() => onDelete(t.id)}
-                        className="opacity-0 group-hover:opacity-100 p-2 text-slate-500 hover:text-rose-400 transition-all"
-                    >
-                        <Trash2 size={16} />
-                    </button>
-                    </div>
+                  ))}
                 </div>
-              ))
             )}
           </div>
         </div>
@@ -744,6 +874,7 @@
         if(!user) return;
         setLoadingOp(true);
         try {
+            // Removemos id se vier, o Firestore gera
             const { id, ...data } = newTransaction; 
             await addDoc(collection(db, 'users', user.uid, 'transactions'), data);
         } catch (error) {
@@ -893,8 +1024,4 @@
     root.render(<App />);
   </script>
 </body>
-</html>
-    
-  </body>
-  
 </html>

@@ -288,39 +288,51 @@
     // --- Views Internas ---
 
     const DashboardView = ({ transactions }) => {
-      // Pega o mês atual para o resumo
-      const currentMonth = new Date().toISOString().slice(0, 7);
+      // Estado para o filtro (inicia com mês atual)
+      const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
 
       const summary = useMemo(() => {
-        // Filtrar transações apenas do mês atual para os cards de resumo
-        const currentMonthTransactions = transactions.filter(t => t.date.startsWith(currentMonth));
+        // Filtrar transações pelo filtro de data (ou todas se filtro vazio)
+        let filteredDocs = transactions;
+        if (filterMonth) {
+            filteredDocs = transactions.filter(t => t.date.startsWith(filterMonth));
+        }
         
-        const income = currentMonthTransactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
-        const expense = currentMonthTransactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
+        const income = filteredDocs.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
+        const expense = filteredDocs.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
         
-        // Saldo total considera tudo (acumulado)
-        const totalIncome = transactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
-        const totalExpense = transactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
-        const balance = totalIncome - totalExpense;
+        // AJUSTE: Saldo agora reflete Receita - Despesa do período filtrado
+        const balance = income - expense;
 
         return { income, expense, balance };
-      }, [transactions, currentMonth]);
+      }, [transactions, filterMonth]);
 
       const chartData = useMemo(() => {
         const data = {};
-        // Gráfico mostra despesas do mês atual
-        transactions
-          .filter(t => t.date.startsWith(currentMonth) && t.type === 'expense')
+        // Gráfico mostra despesas do filtro
+        let filteredDocs = transactions;
+        if (filterMonth) {
+            filteredDocs = transactions.filter(t => t.date.startsWith(filterMonth));
+        }
+
+        filteredDocs
+          .filter(t => t.type === 'expense')
           .forEach(t => {
             data[t.category] = (data[t.category] || 0) + t.amount;
           });
         return Object.keys(data).map(key => ({ name: key, value: data[key] }));
-      }, [transactions, currentMonth]);
+      }, [transactions, filterMonth]);
 
       const areaChartData = useMemo(() => {
           const grouped = {};
-          // Gráfico de linha mostra os últimos dias (independente do mês)
-          const sorted = [...transactions].sort((a,b) => a.date.localeCompare(b.date));
+          
+          // Se tiver filtro, mostra evolução do mês filtrado. Se não, últimos dias globais.
+          let filteredDocs = transactions;
+          if (filterMonth) {
+            filteredDocs = transactions.filter(t => t.date.startsWith(filterMonth));
+          }
+
+          const sorted = [...filteredDocs].sort((a,b) => a.date.localeCompare(b.date));
           
           sorted.forEach(t => {
               const date = t.date;
@@ -328,29 +340,60 @@
               if (t.type === 'income') grouped[date].entrada += t.amount;
               else grouped[date].saida += t.amount;
           });
-          // Pegar os últimos 7 dias com movimentação
+          
+          // Se tiver filtro, mostra todo o período filtrado. Se não, corta nos últimos 7.
+          if (filterMonth) return Object.values(grouped);
           return Object.values(grouped).slice(-7);
-      }, [transactions]);
+      }, [transactions, filterMonth]);
 
       const COLORS = ['#06b6d4', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#6366f1'];
 
       return (
         <div className="space-y-6 animate-fadeIn">
+          {/* Cabeçalho do Dashboard com Filtro */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-800/30 p-4 rounded-xl border border-slate-700/30">
+            <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <LayoutDashboard size={20} className="text-cyan-400" />
+                    Visão Geral
+                </h3>
+                <p className="text-xs text-slate-400">
+                    {filterMonth ? `Exibindo dados de ${filterMonth.split('-').reverse().join('/')}` : 'Exibindo visão geral de todo o período'}
+                </p>
+            </div>
+            
+            <div className="flex items-center gap-2 bg-slate-900 p-1 rounded-xl border border-slate-700">
+                <input 
+                    type="month" 
+                    value={filterMonth}
+                    onChange={(e) => setFilterMonth(e.target.value)}
+                    className="bg-transparent text-white text-sm border-none focus:ring-0 p-2 outline-none"
+                />
+                <button 
+                    onClick={() => setFilterMonth('')} 
+                    className="p-2 text-slate-400 hover:text-white"
+                    title="Ver Todo o Período"
+                >
+                    <X size={16} />
+                </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card 
-              title="Saldo Acumulado" 
+              title={filterMonth ? "Saldo (Período)" : "Saldo Acumulado"} 
               value={formatCurrency(summary.balance)} 
               icon={Wallet} 
               type="balance"
             />
             <Card 
-              title="Receitas (Este Mês)" 
+              title={filterMonth ? "Receitas (Filtro)" : "Receitas (Total)"} 
               value={formatCurrency(summary.income)} 
               icon={ArrowUpCircle} 
               type="income"
             />
             <Card 
-              title="Despesas (Este Mês)" 
+              title={filterMonth ? "Despesas (Filtro)" : "Despesas (Total)"}
               value={formatCurrency(summary.expense)} 
               icon={ArrowDownCircle} 
               type="expense"
@@ -361,7 +404,7 @@
             <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl shadow-lg">
               <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                 <TrendingUp size={20} className="text-cyan-400" />
-                Fluxo de Caixa (Recente)
+                Fluxo de Caixa
               </h3>
               <div className="h-64">
                 {areaChartData.length > 0 ? (
@@ -389,7 +432,7 @@
                     </ResponsiveContainer>
                 ) : (
                     <div className="h-full flex items-center justify-center text-slate-500">
-                        Sem dados suficientes
+                        Sem dados neste período
                     </div>
                 )}
               </div>
@@ -398,7 +441,7 @@
             <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 p-6 rounded-2xl shadow-lg">
               <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                 <PieChart size={20} className="text-purple-400" />
-                Despesas por Categoria (Mês Atual)
+                Despesas por Categoria
               </h3>
               <div className="h-64 flex items-center justify-center">
                 {chartData.length > 0 ? (
@@ -421,7 +464,7 @@
                     </RePieChart>
                     </ResponsiveContainer>
                 ) : (
-                    <div className="text-slate-500">Sem despesas este mês</div>
+                    <div className="text-slate-500">Sem despesas neste período</div>
                 )}
               </div>
               <div className="flex flex-wrap justify-center gap-3 mt-4">
